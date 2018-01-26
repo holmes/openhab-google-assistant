@@ -1,4 +1,4 @@
-# openHAB Google Assistant 
+# openHAB Google Assistant
 
 openHAB Google Assistant is based on [Google Cloud Function](https://cloud.google.com/functions) powered by Firebase and realized by Node.js. This serverless application connects the Google Assistant platform with the users openHAB instance through the openHAB Cloud service and lets the user control IoT devices through the Google Assistant. The openHAB Smart Home app lets you connect, query, and control devices through openHAB cloud infrastructure.
 
@@ -12,13 +12,16 @@ The Google related parts of any Smart Home action rely on Google Home Graph, a d
 ## Requirements
 
 * Google account with "Actions on Google" and "Google Cloud Functions" access
-* oAuth2 Server/Provider (like Amazon Login)
+* oAuth2 Server/Provider (like Google Cloud or Amazon Login)
 * openHAB server that a Google Cloud service endpoint can access
 
 
 ## Google Cloud Functions
 
-* Enable the Cloud Functions API and install the Google Cloud SDK by following this [quickstart](https://cloud.google.com/functions/docs/quickstart) 
+* Enable the Cloud Functions API and install the Google Cloud SDK by following this [quickstart](https://cloud.google.com/functions/docs/quickstart)
+* Modify `functions\config.js`.
+  1. Change `host` to point to your openhab cloud instance, for example: `https:\\openhab.myserver.com`
+  1. Change `path` to the rest API. Defaults to `rest`.
 * Deploy the `openhabGoogleAssistant` (openhab home automation) function with the following command
 
 ```
@@ -29,15 +32,39 @@ gcloud beta functions deploy openhabGoogleAssistant --stage-bucket staging.<PROJ
 * This commands will deploy the function to Google Cloud and give you the endpoint address. Keep the address somewhere, you'll need it (something like `https://us-central1-<PROJECT ID>.cloudfunctions.net/openhabGoogleAssistant`).
 
 
+## Create OAuth Credentials on Google Cloud
+
+You'll need to create OAuth credentials to enable API access.
+* Visit the [Credentials Page](https://console.cloud.google.com/apis/credentials)
+  1. Select "Create Credentials" -> "OAuth client id"
+  1. Select Web Application and give it a name. I left the restrictions open.
+* Copy the client id and the client secret, you'll need these in the next step.
+
+
+
 ## Actions on Google
 
-Actions on Google is Googles platform for developers to extend Google Assistant. Here you need to develop your actions to engage users on Google Home, Pixel, and other surfaces where the Google Assistant is available
+Actions on Google is Google's platform for developers to extend Google Assistant. Here you need to develop your actions to engage users on Google Home, Pixel, and other surfaces where the Google Assistant is available.
 
-* Create and setup an Actions on Google project on the Actions Console using the Actions SDK described [here](https://developers.google.com/actions/sdk/create-a-project).
+* Create and setup an "Actions on Google" project on the [Actions Console using the Actions SDK](https://console.actions.google.com/).
+  1. Select your existing project
+  1. Select "Smart Home Actions". The fulfilment URL is the one saves from the `glcoud beta functions` you saved earlier.
+  1. Fill out all the App information. Feel free to use fake data and images, you're not actually going to submit this.
+  1. Move on to Account linking.
+    * Select Authorization Code
+    * Enter the client ID and client secret from the OAuth Credentials you created earlier
+    * Authorization URL should be something like: `https://openhab.myserver.com/oauth2/authorize`
+    * Token URL should be something like `https://openhab.myserver.com/oauth2/token`
+    * The scope thing is completely unknown and appears to be broken. I set it to `google-assistant` but it doesn't seem to do what I think it should do.
+    * Testing instructions: "None"
+  1. Hit save. You're not actually going to submit this for testing, we just need to set it up so we can deploy it later.
 
-When you ask your assistant to “Turn on the light”, it will use the auth bearer Token and call the specified endpoint. To specify which endpoint the Google Assistant should call, you need to create an action.json similar to the one below, with your endpoint URL
 
-* Update the `openhab-google-assistant/action.json` file and specify the Google Cloud Functions endpoint to the ```url``` variable
+## Deploy your action
+
+When you ask your assistant to “Turn on the light”, it will use the auth bearer Token and call the specified endpoint. To specify which endpoint the Google Assistant should call, you need to create an action.json similar to the one below, with your endpoint URL.
+
+* Update the `openhab-google-assistant/action.json` file and specify the Google Cloud Functions endpoint. This is not your server, this is the endpoint given to you from the call to `gcloud beta functions`
 
 ```
 {
@@ -53,41 +80,50 @@ When you ask your assistant to “Turn on the light”, it will use the auth bea
     "automation" :
     {
      "name": "automation",
-     "url": "https://YOUR-URL/openhabGoogleAssistant"
+     "url": "https://us-central1-YOUR-APPLICATION.cloudfunctions.net/openhabGoogleAssistant"
     }
   }
 }
 ```
 
-* Afterwards upload this action file using the following command:
+* Afterwards deploy this action file using the following command:
 ```
-gactions update --action_package action.json --project <YOUR-GOOGLE-CLOUD-PROJECT-ID>
+gactions update --action_package action.json --project <YOUR-APPLICATION>
 ```
 
-Google Assistant will call the service endpoint: `https://YOUR-URL/openhabGoogleAssistant`.
+Google Assistant will call the service endpoint: `"https://us-central1-YOUR-APPLICATION.cloudfunctions.net/openhabGoogleAssistant"`.
 This web service will receive parameters (intents) from Google and will query/modify openHAB items through openHAB-cloud depending on those parameters.
 
 * You need to Add "App information”, including name and account linking details to the Actions Console
 * Afterwards please run the following command in the gaction CLI:
 ```
-gactions test --action_package PACKAGE_NAME --project AGENT_ID
+gactions test --action_package action.json --project <YOUR-APPLICATION>
 ```
 
-### Account Linkage & OAuth2:
+## Setup your Database
+* SSH into to your openhab cloud instance
+* Open the mongodb client `mongo` and enter these commands
+```
+use openhab
+db.oauth2clients.insert({ clientId: “client id here”, clientSecret: “secret here”})
+db.oauth2scopes.insert({ name: "any"})
+db.oauth2scopes.insert( { name : "google-assistant", description: "Access to myopenHAB specific API for Actions on Google Assistant", } )
+```
 
-To enable the OAuth account linkage you need to setup the according values in the Actions Console: 
-
-Set up account linking:
-
-* Grant type: Autorization code
-* Client ID: `<YOUR-ID>`
-* Client secret: `<YOUR-SECRET>`
-* Authorization URL: `https://<YOUR-URL>/oauth`
-* Token URL: `https://<YOUR-URL>/token`
-
-Save all changes and click on the Test button
+## Hack some scopes together
+Like I mentioned earlier, the scope thing doesn't seem to work the way it is described. So let's hack a few things together.
+* SSH into to your openhab cloud instance
+* Edit the file routes/oauth2.js:
+  1. Comment out line 121: `scope = req.oauth2.req.scope;` and insert the following line above it: `scope = 'any';`
+  ```
+  #scope = req.oauth2.req.scope;
+  scope = 'any'
+  ```
+ * Restart your server
 
 ## Item configuration
+You can skip this section for now and go ahead and try testing the OAuth linking and google cloud functions. If you're
+lucky it'll work and then you'll need to perform these actions to configure your items and then sync again.
 
 * In openHAB 2 Items are exposed via Homekit tags, the following is taken from the homekit binding in openHAB2:
 
@@ -114,7 +150,7 @@ Currently the follwoing Tags are supported (also depending on Googles API capabi
 * You will now be able to see your previously tagged items and devices
 * You can now control those devices from the Google assistant
 
-The following screenshots show the setup and the service linkage (myopenhab.org) procedure within the Google App:  
+The following screenshots show the setup and the service linkage (myopenhab.org) procedure within the Google App:
 
 ![openHAB Google App](/docs/openhab_google_app.png)
 

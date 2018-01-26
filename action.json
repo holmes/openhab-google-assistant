@@ -11,7 +11,7 @@
 		"automation" :
 		{
 			"name": "automation",
-			"url": "<YOUR-CLOUD-FUNCTION-URL>"
+			"url": "https://us-central1-ponderosa-openhab.cloudfunctions.net/openhabGoogleAssistant"
 		}
 	}
 }
